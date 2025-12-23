@@ -185,6 +185,11 @@ The application UI and backend APIs are deployed on **Vercel**.
 
 ---
 
+> Note: AI responses use a local LLM (Ollama) and are fully functional when the project is run locally.
+> The deployed version demonstrates UI, backend architecture, and knowledge management features.
+
+---
+
 ## 🌱 Future Improvements
 
 * Database persistence for chat logs (MongoDB + Prisma)
