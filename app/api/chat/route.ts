@@ -1,83 +1,92 @@
 import { NextResponse } from "next/server";
-import ExcelJS from "exceljs";
+import websiteKB from "@/app/data/knowledge.json";
+import fs from "fs";
 import path from "path";
 
-/* ---------------- Load Knowledge ---------------- */
-async function loadKnowledgeBase() {
-  const workbook = new ExcelJS.Workbook();
-  const filePath = path.join(process.cwd(), "knowledge.xlsx");
+type KBItem = {
+  question: string;
+  answer: string;
+};
 
-  await workbook.xlsx.readFile(filePath);
-  const worksheet = workbook.worksheets[0];
-
-  const knowledge: { question: string; answer: string }[] = [];
-
-  worksheet.eachRow((row, rowNumber) => {
-    if (rowNumber === 1) return;
-
-    const question = row.getCell(2).value?.toString() || "";
-    const answer = row.getCell(3).value?.toString() || "";
-
-    if (question && answer) {
-      knowledge.push({ question, answer });
-    }
-  });
-
-  return knowledge;
+/* ---------- Helpers ---------- */
+function normalize(text: string) {
+  return text.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim();
 }
 
-/* ---------------- Ollama Call ---------------- */
-async function callLLM(prompt: string) {
-  const response = await fetch("http://localhost:11434/api/generate", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "phi",
-      prompt,
-      stream: false,
-    }),
-  });
+/* ---------- Load Knowledge ---------- */
+function loadKnowledge(): KBItem[] {
+  const excelPath = path.join(process.cwd(), "app/data/excelKnowledge.json");
 
-  const data = await response.json();
-  return data.response;
+  if (fs.existsSync(excelPath)) {
+    const excelKB = JSON.parse(fs.readFileSync(excelPath, "utf-8"));
+    return [...websiteKB, ...excelKB];
+  }
+
+  return websiteKB;
 }
 
-/* ---------------- Chat API ---------------- */
+/* ---------- Chat API ---------- */
 export async function POST(req: Request) {
   try {
     const { message } = await req.json();
-    if (!message) {
-      return NextResponse.json({ reply: "Please ask a valid question." });
+
+    if (!message || !message.trim()) {
+      return NextResponse.json({
+        reply: "Please ask a valid question.",
+      });
     }
 
-    const knowledgeBase = await loadKnowledgeBase();
+    const userQuery = normalize(message);
+    const knowledge = loadKnowledge();
 
-    const context = knowledgeBase
-      .map(
-        (item) => `Q: ${item.question}\nA: ${item.answer}`
-      )
-      .join("\n\n");
+    /* ---------- HARD BLOCK ---------- */
+    const blocked = [
+      "revenue",
+      "profit",
+      "financial",
+      "ceo",
+      "puzzle",
+      "logic",
+      "calculate",
+      "infer",
+    ];
 
-    const systemPrompt = `
-You are an AI assistant for Kenmark ITan Solutions.
-Answer ONLY using the information below.
-If the answer is not present, politely say you do not know.
+    if (blocked.some(b => userQuery.includes(b))) {
+      return NextResponse.json({
+        reply: "I do not have that information available.",
+      });
+    }
 
-Knowledge Base:
-${context}
+    /* ---------- BEST MATCH SCORING ---------- */
+    let bestMatch: KBItem | null = null;
+    let bestScore = 0;
 
-User Question:
-${message}
+    for (const item of knowledge) {
+      const q = normalize(item.question);
+      const qWords = q.split(" ");
+      const score = qWords.filter(w => userQuery.includes(w)).length;
 
-Answer:
-`;
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = item;
+      }
+    }
 
-    const aiResponse = await callLLM(systemPrompt);
+    /* ---------- CONFIDENCE CHECK ---------- */
+    if (!bestMatch || bestScore < 2) {
+      return NextResponse.json({
+        reply: "I do not have that information available.",
+      });
+    }
 
-    return NextResponse.json({ reply: aiResponse.trim() });
-  } catch (error) {
     return NextResponse.json({
-      reply: "Something went wrong while generating the response.",
+      reply: bestMatch.answer,
+    });
+
+  } catch (error) {
+    console.error("Chat API error:", error);
+    return NextResponse.json({
+      reply: "Something went wrong. Please try again later.",
     });
   }
 }

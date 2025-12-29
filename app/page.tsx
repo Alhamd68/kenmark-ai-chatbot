@@ -87,9 +87,9 @@ export default function Home() {
             Admin Knowledge Management
           </h2>
           <p className="text-sm text-gray-500 mb-4">
-            Upload an Excel (.xlsx) file to update the chatbot knowledge base.
-            Changes apply instantly.
-          </p>
+  Excel upload is supported in local/admin environments.
+  In production, the chatbot uses a structured knowledge base.
+</p>
 
           <input
             type="file"
